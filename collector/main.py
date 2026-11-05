@@ -12,7 +12,7 @@ import db
 
 SERVICE = "collector"
 MAX_PER_SOURCE = None  # None: take everything the feed gives; repeats are dropped by the database for free
-MAX_AGE_DAYS = 14  # older materials are not saved: there is no archive at this stage
+MAX_AGE_DAYS = 60  # older materials are not saved: there is no archive at this stage
 MAX_TEXT = 1500
 TG_TITLE = 120
 TEXT_FIELDS = ("description", "full-text", "encoded")  # feeds keep the article text in different fields
