@@ -12,34 +12,54 @@ import db
 
 SERVICE = "worker"
 MODEL = os.environ.get("MODEL", "anthropic/claude-haiku-5.5")
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v1-corpfood"
 POLL_SECONDS = 10
 RETRY_SECONDS = 3600
+MAX_ANSWER_TOKENS = 2000  # free models spend part of this limit on reasoning; 700 cut their answers off
 
-ENTITIES = [
-    "OpenAI",
-    "Anthropic",
-    "Google",
-    "Meta",
-    "Microsoft",
-    "Apple",
-    "Nvidia",
-    "DeepSeek",
-    "Mistral",
-    "xAI",
-    "Яндекс",
-    "Сбер",
+MARKETS = [
+    "корпоративное питание",
+    "C&B и льготы",
+    "готовая еда",
+    "общепит",
+    "микромаркеты",
+    "вендинг",
+    "кейтеринг",
+    "рационы",
+    "опт и закупки HoReCa",
 ]
 
-PROMPT = """Ты помогаешь вести desk research по рынку разговоров об искусственном интеллекте.
+OTHER_EVENT = "Другое"
+EVENT_TYPES = [
+    "Открытие или обновление точки питания",
+    "Контракт, тендер, смена оператора",
+    "Новый формат или услуга",
+    "Условия питания у работодателя",
+    "Финансы и сделки компаний",
+    "Исследования и опросы",
+    "Законы, налоги, стандарты, госзакупки",
+    "Зарубежный рынок",
+    OTHER_EVENT,
+]
+
+PROMPT = """Ты помогаешь исследователям следить за рынком корпоративного питания.
 Материал:
 Заголовок: {title}
 Текст: {text}
 
+По теме: организация питания сотрудников любым способом. Столовые на предприятиях и в офисах, операторы питания, тендеры и контракты на питание, компенсация и дотация обедов, карты питания, вендинг и микромаркеты на работе, питание как льгота, исследования о питании сотрудников.
+Тоже по теме: любая новость о компании-операторе питания, даже если она не про столовые (сделки, выручка, новые направления). Такие операторы, например: РБЕ (RBE), Бахетле, ОМС — питание металлургов, ЭкоСфера, Кафетера, BestPit, Калина Групп, Перерыв на обед, Экипаж-Кейтеринг, Sodexo, Everyx, НаЛанч, Foodcard, Яндекс Ланч Карта, Обед.ру. Также по теме: цифры рынка организованного питания, в том числе объёмы госзакупок питания для школ и больниц.
+Не по теме: розничные магазины и сети, рестораны для гостей, доставка еды частным лицам, отдельные случаи школьного, больничного и армейского питания без цифр рынка (конкурсы, меню, жалобы). Например, «ВкусВилл открыл магазин в бизнес-центре» и «школьная столовая победила в конкурсе» не по теме.
+
+Как выбирать тип события: всё, что происходит за пределами России, это «Зарубежный рынок», даже если это контракт или открытие. Опросы и обзоры с долями компаний, в том числе про льготы, это «Исследования и опросы». «Условия питания у работодателя» только про конкретного работодателя.
+
 Ответь строго JSON без пояснений:
-{{"about_ai": true или false — материал про искусственный интеллект,
-  "entity": одна компания из списка {entities}, о которой материал, или null,
-  "summary": "о чем материал, одна короткая фраза по-русски"}}"""
+{{"about_corp_food": true или false, материал по теме,
+  "companies": [все компании и предприятия из текста, как они написаны; пустой список, если их нет],
+  "markets": [один или несколько рынков, которые задевает материал, из списка: {markets}],
+  "event_type": "один тип события из списка: {event_types}",
+  "region": "город или регион, если он назван в тексте, иначе null",
+  "summary": "о чем материал, 2-3 предложения по-русски, только факты из текста; если текста мало, напиши короче; не упоминай, чего в тексте нет"}}"""
 
 
 def ask_model(title, text):
@@ -49,11 +69,15 @@ def ask_model(title, text):
             {
                 "role": "user",
                 "content": PROMPT.format(
-                    title=title, text=(text or "")[:2000], entities=", ".join(ENTITIES)
+                    title=title,
+                    text=(text or "")[:2000],
+                    markets="; ".join(MARKETS),
+                    event_types="; ".join(EVENT_TYPES),
                 ),
             }
         ],
         "response_format": {"type": "json_object"},
+        "max_tokens": MAX_ANSWER_TOKENS,
     }
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -68,7 +92,25 @@ def ask_model(title, text):
     content = (
         content.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
     )
-    return json.loads(content)
+    # the model sometimes adds text after the answer: read the first JSON object only
+    return json.JSONDecoder().raw_decode(content.strip())[0]
+
+
+def clean_answer(answer):
+    """Checks the model's answer. A bad answer raises an error and the material goes to retry."""
+    if not answer.get("about_corp_food"):
+        return None
+    summary = (answer.get("summary") or "").strip()
+    if not summary:
+        raise ValueError("в ответе нет пересказа")
+    event_type = answer.get("event_type")
+    return {
+        "companies": ", ".join(answer.get("companies") or []),
+        "markets": ", ".join(m for m in answer.get("markets") or [] if m in MARKETS),
+        "event_type": event_type if event_type in EVENT_TYPES else OTHER_EVENT,
+        "region": answer.get("region") or None,
+        "summary": summary,
+    }
 
 
 def process_new(conn):
@@ -81,19 +123,27 @@ def process_new(conn):
     found = 0
     for done, (material_id, title, text) in enumerate(pending, 1):
         try:
-            answer = ask_model(title, text)
+            answer = clean_answer(ask_model(title, text))
         except Exception as error:
             conn.execute(
                 "UPDATE materials SET status = 'failed' WHERE id = %s", (material_id,)
             )
             db.log(SERVICE, f"материал {material_id}: модель не ответила: {error}")
             continue
-        if answer.get("about_ai"):
-            entity = answer.get("entity") if answer.get("entity") in ENTITIES else None
+        if answer:
             conn.execute(
-                """INSERT INTO findings (material_id, entity, summary, model, prompt_version)
-                   VALUES (%s, %s, %s, %s, %s) ON CONFLICT (material_id) DO NOTHING""",
-                (material_id, entity, answer["summary"], MODEL, PROMPT_VERSION),
+                """INSERT INTO findings (material_id, companies, markets, event_type, region, summary, model, prompt_version)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (material_id) DO NOTHING""",
+                (
+                    material_id,
+                    answer["companies"],
+                    answer["markets"],
+                    answer["event_type"],
+                    answer["region"],
+                    answer["summary"],
+                    MODEL,
+                    PROMPT_VERSION,
+                ),
             )
             conn.execute(
                 "UPDATE materials SET status = 'done' WHERE id = %s", (material_id,)
@@ -101,13 +151,13 @@ def process_new(conn):
             found += 1
             db.log(
                 SERVICE,
-                f"материал {material_id} -> находка ({entity or 'без компании'}): {answer['summary']}",
+                f"материал {material_id} -> находка ({answer['event_type']}): {answer['summary']}",
             )
         else:
             conn.execute(
                 "UPDATE materials SET status = 'skipped' WHERE id = %s", (material_id,)
             )
-            db.log(SERVICE, f"материал {material_id} не про AI, пропускаю")
+            db.log(SERVICE, f"материал {material_id} не по теме, пропускаю")
         if done % 10 == 0:
             db.progress_run(
                 conn, SERVICE, run_id, found, f"разобрано {done} из {len(pending)}"

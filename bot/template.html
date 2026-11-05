@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Desk Research</title>
+<title>Питание на работе</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 /*BRAND*/
@@ -54,7 +54,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .line1 .src { color: var(--fg); font-weight: 600; }
 .new { width: 7px; height: 7px; border-radius: 2px; background: var(--fg); flex: none; }
 .tag { font-family: var(--family-mono); font-size: 11.5px; padding: 3px 7px; border-radius: var(--corner-sm); border: 1px solid var(--rule-strong); color: var(--fg-dim); }
-.item p { margin: 8px 0 0; font-size: 15.5px; line-height: 1.45; color: var(--fg); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.item p { margin: 8px 0 0; font-size: 15.5px; line-height: 1.45; color: var(--fg); display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
 .empty { padding: 48px 16px; text-align: center; color: var(--fg-dim); display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .empty p { margin: 0; }
 .reset { padding: 10px 16px; border-radius: var(--corner-md); border: 1px solid var(--rule-strong); color: var(--fg); }
@@ -117,8 +117,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 <div class="app">
   <header class="head" id="head">
     <div class="brand">
-      <h1 class="wordmark">Desk Research</h1>
-      <span class="label">AI</span>
+      <h1 class="wordmark">Питание на работе</h1>
     </div>
     <div class="label meta" id="meta"></div>
   </header>
@@ -163,7 +162,8 @@ const plural = (n, one, few, many) => {
   return many;
 };
 const day = (iso) => new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
-const tags = (f) => (f.reason || "").split(/,\s*/).map((t) => t.trim()).filter((t) => t && t.length <= 24).slice(0, 3);
+const listOf = (s) => (s || "").split(/,\s*/).map((t) => t.trim()).filter(Boolean);
+const tags = (f) => [...listOf(f.markets), ...listOf(f.companies), f.region].filter(Boolean);
 const haptic = () => { if (inTelegram && tg.HapticFeedback) tg.HapticFeedback.selectionChanged(); };
 
 function openLink(url) {
@@ -172,7 +172,7 @@ function openLink(url) {
 
 const findings = DATA.findings;
 const lastRun = DATA.run ? DATA.run.id : null;
-const state = { view: "feed", period: "all", company: "all", open: null, feedScroll: 0 };
+const state = { view: "feed", period: "all", event: "all", open: null, feedScroll: 0 };
 
 const PERIODS = [
   { key: "all", name: "Все", days: Infinity },
@@ -181,10 +181,10 @@ const PERIODS = [
   { key: "month", name: "Месяц", days: 31 },
 ];
 const inPeriod = (f, key) => (Date.now() - new Date(f.date).getTime()) / 864e5 <= PERIODS.find((x) => x.key === key).days;
-const companies = [...new Set(findings.map((f) => f.reason).filter(Boolean))].sort((a, b) => findings.filter((f) => f.reason === b).length - findings.filter((f) => f.reason === a).length);
-const byCompany = (f, c) => c === "all" || f.reason === c;
+const eventTypes = [...new Set(findings.map((f) => f.event_type).filter(Boolean))].sort((a, b) => findings.filter((f) => f.event_type === b).length - findings.filter((f) => f.event_type === a).length);
+const byEvent = (f, e) => e === "all" || f.event_type === e;
 const visible = () => findings
-  .filter((f) => inPeriod(f, state.period) && byCompany(f, state.company))
+  .filter((f) => inPeriod(f, state.period) && byEvent(f, state.event))
   .sort((a, b) => b.date.localeCompare(a.date));
 
 /* ---------- filters ---------- */
@@ -193,15 +193,15 @@ function renderFilters() {
   $("#filters").style.display = show ? "" : "none";
   if (!show) return;
   $("#periods").innerHTML = PERIODS.map((p) => {
-    const n = findings.filter((f) => inPeriod(f, p.key) && byCompany(f, state.company)).length;
+    const n = findings.filter((f) => inPeriod(f, p.key) && byEvent(f, state.event)).length;
     return `<button class="chip" data-period="${p.key}" aria-pressed="${state.period === p.key}">${p.name}<span class="num">${n}</span></button>`;
   }).join("");
-  $("#sources").innerHTML = ["all", ...companies].map((c) => {
-    const n = findings.filter((f) => inPeriod(f, state.period) && byCompany(f, c)).length;
-    return `<button class="chip" data-company="${esc(c)}" aria-pressed="${state.company === c}">${c === "all" ? "Все компании" : esc(c)}<span class="num">${n}</span></button>`;
+  $("#sources").innerHTML = ["all", ...eventTypes].map((e) => {
+    const n = findings.filter((f) => inPeriod(f, state.period) && byEvent(f, e)).length;
+    return `<button class="chip" data-event="${esc(e)}" aria-pressed="${state.event === e}">${e === "all" ? "Все типы" : esc(e)}<span class="num">${n}</span></button>`;
   }).join("");
   document.querySelectorAll("[data-period]").forEach((b) => b.onclick = () => { state.period = b.dataset.period; haptic(); render(); });
-  document.querySelectorAll("[data-company]").forEach((b) => b.onclick = () => { state.company = b.dataset.company; haptic(); render(); });
+  document.querySelectorAll("[data-event]").forEach((b) => b.onclick = () => { state.event = b.dataset.event; haptic(); render(); });
 }
 
 /* ---------- feed ---------- */
@@ -218,7 +218,7 @@ function renderFeed() {
       <span class="line1">
         ${f.run_id === lastRun ? `<span class="new" title="из последнего прогона"></span>` : ""}
         <span class="src">${esc(f.source)}</span><span>· ${day(f.date)}</span>
-        ${tags(f).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}
+        <span class="tag">${esc(f.event_type)}</span>
       </span>
       <p>${esc(f.summary)}</p>
     </button></li>`).join("")}</ul>`;
@@ -228,7 +228,6 @@ function renderFeed() {
 function renderDetail(f) {
   const list = visible();
   const at = list.findIndex((x) => x.id === f.id);
-  const same = f.summary.trim() === f.title.trim();
   const text = f.text ? esc(f.text) + (f.text.length >= 600 ? "…" : "") : "";
   return `<article class="detail">
     <div class="bar">
@@ -240,10 +239,10 @@ function renderDetail(f) {
       </div>
     </div>
     <span class="label">${esc(f.source)} · ${day(f.date)}${f.run_id === lastRun ? " · новое" : ""}</span>
-    <h2>${esc(f.summary)}</h2>
-    ${same ? "" : `<p class="orig">${esc(f.title)}</p>`}
+    <h2>${esc(f.title)}</h2>
+    <p class="orig">${esc(f.summary)}</p>
+    <div class="tags"><span class="tag">${esc(f.event_type)}</span>${tags(f).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>
     ${text ? `<p class="excerpt">${text}</p>` : ""}
-    ${tags(f).length ? `<div class="tags">${tags(f).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
     ${inTelegram ? "" : `<button class="btn main" data-url="${esc(f.url)}">Открыть материал</button>`}
     <section class="trace">
       <span class="label">Связи</span>
@@ -251,7 +250,7 @@ function renderDetail(f) {
       <p class="say">В каждой записи лежит номер записи из другой таблицы. По этим номерам от находки доходим до источника.</p>
       <div class="rec">
         <span class="label"><span>findings</span><span class="num">id ${f.id}</span></span>
-        <p class="key">entity = ${esc(f.reason || "—")} · model = ${esc(f.model)}</p>
+        <p class="key">companies = ${esc(f.companies || "—")} · model = ${esc(f.model)}</p>
         <p class="key">material_id = ${f.material_id}${f.sent_at ? ` · отправлена ${esc(f.sent_at.slice(0, 16).replace("T", " "))}` : ""}</p>
       </div>
       <span class="link">material_id → materials.id</span>
@@ -286,8 +285,8 @@ function renderHow() {
       say: `В базе Postgres сейчас ${t.materials} ${plural(t.materials, "материал", "материала", "материалов")}. Повторы она не пускает.`,
       more: `У ссылки в таблице <code>materials</code> стоит правило <code>UNIQUE</code>: одна ссылка не попадет в базу дважды. Каждый материал знает свой источник (<code>source_id</code>) и прогон сбора (<code>run_id</code>).` },
     { verb: "Разобрал", metric: `<mark>${r.kept}</mark>`,
-      say: `Модель посмотрела ${r.processed} ${plural(r.processed, "материал", "материала", "материалов")}: ${r.kept} ${plural(r.kept, "стал находкой", "стали находками", "стали находками")}, ${r.skipped} не про AI${r.failed ? `, ${r.failed} не разобрано` : ""}${r.waiting ? `, ${r.waiting} ждут очереди` : ""}.`,
-      more: `Это единственное место системы, где работает модель: <code>worker/main.py</code>. Она решает, про AI ли материал, пишет одну фразу и выбирает компанию из списка <code>ENTITIES</code>. Находка ложится в таблицу <code>findings</code> со ссылкой на материал.` },
+      say: `Модель посмотрела ${r.processed} ${plural(r.processed, "материал", "материала", "материалов")}: ${r.kept} ${plural(r.kept, "стал находкой", "стали находками", "стали находками")}, ${r.skipped} не по теме${r.failed ? `, ${r.failed} не разобрано` : ""}${r.waiting ? `, ${r.waiting} ждут очереди` : ""}.`,
+      more: `Это единственное место системы, где работает модель: <code>worker/main.py</code>. Она решает, про питание сотрудников ли материал, размечает рынки, тип события, компании и регион и пишет пересказ в 2–3 предложения. Находка ложится в таблицу <code>findings</code> со ссылкой на материал.` },
     { verb: "Отправил", metric: r.sent,
       say: r.sent ? `Бот прислал ${r.sent} ${plural(r.sent, "находку", "находки", "находок")} подписчикам: их ${t.subscribers}.` : `Из этого сбора бот еще ничего не рассылал. Подписчиков: ${t.subscribers}.`,
       more: `Когда модель разобрала весь сбор, бот присылает одну сводку всем из таблицы <code>subscribers</code> и ставит находкам отметку <code>sent_at</code>. Поэтому одна находка не придет дважды. Код: <code>bot/main.py</code>.` },
@@ -365,7 +364,7 @@ function render() {
   view.querySelectorAll("[data-step]").forEach((b) => b.onclick = () => stepFinding(Number(b.dataset.step)));
   view.querySelectorAll("[data-url]").forEach((b) => b.onclick = () => openLink(b.dataset.url));
   view.querySelectorAll("[data-back]").forEach((b) => b.onclick = closeDetail);
-  view.querySelectorAll("[data-reset]").forEach((b) => b.onclick = () => { state.period = "all"; state.company = "all"; render(); });
+  view.querySelectorAll("[data-reset]").forEach((b) => b.onclick = () => { state.period = "all"; state.event = "all"; render(); });
   view.querySelectorAll(".stepbox").forEach((b) => b.onclick = () => b.setAttribute("aria-expanded", b.getAttribute("aria-expanded") !== "true"));
   view.querySelectorAll(".step").forEach((s, i) => setTimeout(() => s.classList.add("shown"), 80 + i * 160));
 

@@ -65,7 +65,7 @@ def render(conn):
     ).fetchone()
     last_run = f"{last[1]:%d.%m %H:%M} UTC, {last[0]}" if last else "еще не было"
     rows = conn.execute(
-        """SELECT m.published_at, s.name, f.entity, f.summary, m.url
+        """SELECT m.published_at, s.name, f.companies, f.summary, m.url
            FROM findings f
            JOIN materials m ON m.id = f.material_id
            JOIN sources s ON s.id = m.source_id

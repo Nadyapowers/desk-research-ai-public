@@ -81,12 +81,24 @@ def say(chat_id, text, button=True):
 
 def finding_lines(rows):
     lines = []
-    for summary, entity, url, source in rows:
-        line = f'• <a href="{html.escape(url)}">{html.escape(summary)}</a>\n  {html.escape(source)}'
-        if entity:
-            line += f" · {html.escape(entity)}"
+    for summary, companies, region, url, source in rows:
+        line = f'• {html.escape(summary)}\n  <a href="{html.escape(url)}">{html.escape(source)}</a>'
+        for detail in (companies, region):
+            if detail:
+                line += f" · {html.escape(detail)}"
         lines.append(line)
     return lines
+
+
+def grouped_by_event(rows):
+    """Sections of the summary: event type in bold, its findings below."""
+    groups = {}
+    for event_type, *finding in rows:
+        groups.setdefault(event_type, []).append(finding)
+    return [
+        f"<b>{html.escape(event_type)}</b>\n\n" + "\n\n".join(finding_lines(findings))
+        for event_type, findings in groups.items()
+    ]
 
 
 def setup(conn):
@@ -131,19 +143,19 @@ def send_new(conn):
     ids = [row[0] for row in conn.execute("SELECT id FROM findings WHERE sent_at IS NULL")]
     if not subscribers or not ids:
         return
-    companies = conn.execute(
-        "SELECT coalesce(entity, 'без компании'), count(*) FROM findings WHERE id = ANY(%s)"
-        " GROUP BY entity ORDER BY entity IS NULL, count(*) DESC",
+    event_types = conn.execute(
+        "SELECT event_type, count(*) FROM findings WHERE id = ANY(%s)"
+        " GROUP BY event_type ORDER BY count(*) DESC",
         (ids,),
     ).fetchall()
     latest = conn.execute(
-        "SELECT f.summary, f.entity, m.url, s.name FROM findings f"
+        "SELECT f.event_type, f.summary, f.companies, f.region, m.url, s.name FROM findings f"
         " JOIN materials m ON m.id = f.material_id JOIN sources s ON s.id = m.source_id"
         " WHERE f.id = ANY(%s) ORDER BY f.id DESC LIMIT %s",
         (ids, LATEST),
     ).fetchall()
-    text = f"<b>Новых находок: {len(ids)}</b>\n" + " · ".join(f"{html.escape(name)} {count}" for name, count in companies)
-    text += "\n\nСвежие:\n\n" + "\n\n".join(finding_lines(latest))
+    text = f"<b>Новых находок: {len(ids)}</b>\n" + " · ".join(f"{html.escape(name)} {count}" for name, count in event_types)
+    text += "\n\nСвежие:\n\n" + "\n\n".join(grouped_by_event(latest))
     if len(ids) > LATEST:
         text += f"\n\nЕще {len(ids) - LATEST} в ленте."
     run_id = db.start_run(conn, SERVICE)
@@ -198,10 +210,10 @@ def handle(conn, message):
             (chat["id"], name),
         )
         latest = conn.execute(
-            "SELECT f.summary, f.entity, m.url, s.name FROM findings f"
+            "SELECT f.summary, f.companies, f.region, m.url, s.name FROM findings f"
             " JOIN materials m ON m.id = f.material_id JOIN sources s ON s.id = m.source_id ORDER BY f.id DESC LIMIT 5"
         ).fetchall()
-        text = "Готово, вы подписаны. После каждого сбора пришлю сюда одну сводку: сколько новых находок и по каким компаниям."
+        text = "Готово, вы подписаны. Это новости о корпоративном питании. После каждого сбора пришлю сюда одну сводку: сколько новых находок и какого они типа."
         if latest:
             text += "\n\nПоследние:\n\n" + "\n\n".join(finding_lines(latest))
         text += "\n\nВсе находки в ленте: кнопка ниже или «Лента» рядом с полем ввода. /status покажет, как работают блоки."
@@ -267,7 +279,10 @@ def page_data(conn):
         "id",
         "material_id",
         "summary",
-        "reason",
+        "companies",
+        "markets",
+        "event_type",
+        "region",
         "title",
         "url",
         "date",
@@ -281,7 +296,7 @@ def page_data(conn):
     )
     findings = []
     for row in conn.execute(
-        "SELECT f.id, m.id, f.summary, f.entity, m.title, m.url, coalesce(m.published_at, m.collected_at), m.run_id,"
+        "SELECT f.id, m.id, f.summary, f.companies, f.markets, f.event_type, f.region, m.title, m.url, coalesce(m.published_at, m.collected_at), m.run_id,"
         " s.id, s.name, s.url, left(m.text, 600), f.sent_at, f.model"
         " FROM findings f JOIN materials m ON m.id = f.material_id JOIN sources s ON s.id = m.source_id"
         " ORDER BY f.id DESC LIMIT 300"
