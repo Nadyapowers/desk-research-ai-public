@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import db
+from worker.main import shorten
 
 SERVICE = "bot"
 HERE = Path(__file__).resolve().parent
@@ -82,7 +83,7 @@ def say(chat_id, text, button=True):
 def finding_lines(rows):
     lines = []
     for summary, companies, region, url, source in rows:
-        line = f'• {html.escape(summary)}\n  <a href="{html.escape(url)}">{html.escape(source)}</a>'
+        line = f'• {html.escape(shorten(summary))}\n  <a href="{html.escape(url)}">{html.escape(source)}</a>'
         for detail in (companies, region):
             if detail:
                 line += f" · {html.escape(detail)}"
@@ -149,7 +150,7 @@ def send_new(conn):
         (ids,),
     ).fetchall()
     latest = conn.execute(
-        "SELECT f.event_type, f.summary, f.companies, f.region, m.url, s.name FROM findings f"
+        "SELECT f.event_type, coalesce(f.headline, f.summary), f.companies, f.region, m.url, s.name FROM findings f"
         " JOIN materials m ON m.id = f.material_id JOIN sources s ON s.id = m.source_id"
         " WHERE f.id = ANY(%s) ORDER BY f.id DESC LIMIT %s",
         (ids, LATEST),
@@ -210,7 +211,7 @@ def handle(conn, message):
             (chat["id"], name),
         )
         latest = conn.execute(
-            "SELECT f.summary, f.companies, f.region, m.url, s.name FROM findings f"
+            "SELECT coalesce(f.headline, f.summary), f.companies, f.region, m.url, s.name FROM findings f"
             " JOIN materials m ON m.id = f.material_id JOIN sources s ON s.id = m.source_id ORDER BY f.id DESC LIMIT 5"
         ).fetchall()
         text = "Готово, вы подписаны. Это новости о корпоративном питании. После каждого сбора пришлю сюда одну сводку: сколько новых находок и какого они типа."
@@ -278,6 +279,7 @@ def page_data(conn):
     fields = (
         "id",
         "material_id",
+        "headline",
         "summary",
         "companies",
         "markets",
@@ -296,12 +298,13 @@ def page_data(conn):
     )
     findings = []
     for row in conn.execute(
-        "SELECT f.id, m.id, f.summary, f.companies, f.markets, f.event_type, f.region, m.title, m.url, coalesce(m.published_at, m.collected_at), m.run_id,"
+        "SELECT f.id, m.id, f.headline, f.summary, f.companies, f.markets, f.event_type, f.region, m.title, m.url, coalesce(m.published_at, m.collected_at), m.run_id,"
         " s.id, s.name, s.url, left(m.text, 600), f.sent_at, f.model"
         " FROM findings f JOIN materials m ON m.id = f.material_id JOIN sources s ON s.id = m.source_id"
         " ORDER BY f.id DESC LIMIT 300"
     ):
         finding = dict(zip(fields, row))
+        finding["headline"] = shorten(finding["headline"] or finding["summary"])
         finding["date"], finding["sent_at"] = (
             iso(finding["date"]),
             iso(finding["sent_at"]),

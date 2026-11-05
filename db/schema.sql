@@ -52,6 +52,9 @@ CREATE TABLE IF NOT EXISTS findings (
 -- the bot marks a finding when it has been sent to subscribers
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;
 
+-- the finding in one phrase up to 100 characters; findings sorted earlier have none
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS headline TEXT;
+
 CREATE TABLE IF NOT EXISTS subscribers (
     chat_id     BIGINT PRIMARY KEY,
     name        TEXT,
