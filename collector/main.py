@@ -2,6 +2,7 @@
 
 import html
 import json
+import os
 import re
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -17,6 +18,10 @@ MAX_TEXT = 1500
 TG_TITLE = 120
 TEXT_FIELDS = ("description", "full-text", "encoded")  # feeds keep the article text in different fields
 ATOM = "{http://www.w3.org/2005/Atom}"
+EXA_URL = "https://api.exa.ai/search"
+EXA_KEY = "EXA_API_KEY"
+EXA_DAYS = 7  # Exa returns only materials published within this many days
+EXA_RESULTS = 10
 
 
 def fetch(url):
@@ -102,7 +107,52 @@ def read_tg(url):
         }
 
 
-READERS = {"hn": read_hn, "arxiv": read_arxiv, "rss": read_rss, "tg": read_tg}
+def exa_request(query, now=None):
+    # in an exa source the url field keeps the search query text
+    since = (now or datetime.now(timezone.utc)) - timedelta(days=EXA_DAYS)
+    return {
+        "query": query,
+        "type": "auto",
+        "numResults": EXA_RESULTS,
+        "startPublishedDate": since.isoformat(timespec="seconds"),
+        "userLocation": "RU",  # results are localized for Russia; foreign news is not cut off
+        "contents": {"text": {"maxCharacters": MAX_TEXT}},
+    }
+
+
+def parse_exa(answer):
+    for result in answer.get("results") or []:
+        link = (result.get("url") or "").strip()
+        title = " ".join((result.get("title") or "").split())
+        date = result.get("publishedDate")
+        if not link or not title or not date:
+            continue  # without a date old company pages slip in
+        yield {
+            "url": link,
+            "title": title,
+            "text": " ".join((result.get("text") or "").split())[:MAX_TEXT],
+            "published_at": date,
+        }
+
+
+def post_json(url, body, headers):
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"User-Agent": "food-at-work-news/0.1", "Content-Type": "application/json", **headers},
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read())
+
+
+def read_exa(query):
+    key = os.environ.get(EXA_KEY)
+    if not key:
+        return  # main() skips exa sources without a key and writes it to the log once
+    yield from parse_exa(post_json(EXA_URL, exa_request(query), {"x-api-key": key}))
+
+
+READERS = {"hn": read_hn, "arxiv": read_arxiv, "rss": read_rss, "tg": read_tg, "exa": read_exa}
 
 
 def is_fresh(published_at):
@@ -124,6 +174,9 @@ def main():
         sources = conn.execute(
             "SELECT id, name, kind, url FROM sources WHERE active"
         ).fetchall()
+        if not os.environ.get(EXA_KEY) and any(kind == "exa" for _, _, kind, _ in sources):
+            db.log(SERVICE, f"ключ {EXA_KEY} не задан, поиск Exa пропущен")
+            sources = [source for source in sources if source[2] != "exa"]
         for source_id, name, kind, url in sources:
             try:
                 items = list(READERS[kind](url))[:MAX_PER_SOURCE]

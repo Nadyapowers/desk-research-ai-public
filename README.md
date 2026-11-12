@@ -87,7 +87,7 @@ sqlite3 props/findings.sqlite "SELECT s.name, f.summary FROM findings f JOIN sou
 
 ## Что поменять под свой рынок
 
-- Источники: список в конце `db/schema.sql`. Поддерживаются четыре вида: `hn` (поиск Hacker News), `arxiv`, `rss`, `tg` (открытый Telegram-канал, адрес вида `https://t.me/s/канал`).
+- Источники: список в конце `db/schema.sql`. Поддерживаются пять видов: `hn` (поиск Hacker News), `arxiv`, `rss`, `tg` (открытый Telegram-канал, адрес вида `https://t.me/s/канал`), `exa` (поиск по интернету через Exa, вместо адреса пишется текст запроса). Exa приносит только материалы с датой публикации за последние 7 дней и работает, если задан ключ `EXA_API_KEY` (берут на https://dashboard.exa.ai/api-keys, в Coolify вписывают в переменные ресурса). Без ключа источники `exa` пропускаются.
 - Сколько материалов брать из источника за проход: `MAX_PER_SOURCE` в `collector/main.py`.
 - Рынки и типы событий: списки `MARKETS` и `EVENT_TYPES` в `worker/main.py`. Там же текст запроса к модели.
 - За какой срок сохранять новости: `MAX_AGE_DAYS` в `collector/main.py`.

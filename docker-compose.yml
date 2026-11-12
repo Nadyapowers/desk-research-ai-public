@@ -1,5 +1,6 @@
 # Whole system in one resource: database, worker and bot.
-# Coolify fills the SERVICE_* values itself; you only set TELEGRAM_TOKEN and OPENROUTER_API_KEY.
+# Coolify fills the SERVICE_* values itself; you only set TELEGRAM_TOKEN and OPENROUTER_API_KEY,
+# and EXA_API_KEY if the collector should search with Exa.
 # The daily collection is a scheduled task in the worker container: python main.py collector
 services:
   postgres:
@@ -22,6 +23,7 @@ services:
       - BLOCK=worker
       - DATABASE_URL=postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/desk_research
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - EXA_API_KEY=${EXA_API_KEY:-}
       - MODEL=${MODEL:-anthropic/claude-haiku-5.5}
     depends_on:
       postgres:
